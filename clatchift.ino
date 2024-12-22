@@ -1,5 +1,4 @@
 #include <Bounce2.h>
-#include <Audio.h>
 #include <Wire.h>
 #include <SPI.h>
 #include <SD.h>
@@ -22,13 +21,9 @@
 #define ADC_MAX_VAL 8192
 #define CHANGE_TOLERANCE 64
 
-#define CTRL_SAMPLE_RATE 8000
+#define CTRL_SAMPLE_RATE 48000
 #define CTRL_TIMER_US (1000000/CTRL_SAMPLE_RATE)
 #define CTRL_1MS (CTRL_SAMPLE_RATE/1000)
-
-AudioSynthWaveformDc dc;
-AudioOutputAnalog dac;
-AudioConnection patchCord12(dc, dac);
 
 #define B32_1HZ_DELTA ((0xFFFFFFFF)/CTRL_SAMPLE_RATE)
 #define B32_1MS_DELTA (B32_1HZ_DELTA/1000)
@@ -173,7 +168,6 @@ int ledMask = 0;
 int lastScaleFactor = 0;
 int clockDividerIndex = 0;
 int clockDividerLen = 1;
-int interval = 0;
 float analogOutVal = -1;
 
 void ctrlLoop() {
@@ -203,8 +197,7 @@ void ctrlLoop() {
 
       if(clockDividerIndex == 0) {
         clockGenerator.Reset();
-        interval = clockRateDetector.GetInterval();
-        clockGenerator.SetInterval(scaleInterval(interval, scaleFactor));
+        clockGenerator.SetInterval(scaleInterval(clockRateDetector.GetInterval(), scaleFactor));
         clockGenerator.SetOffset(offsetPot);
       }
 
@@ -221,7 +214,7 @@ void ctrlLoop() {
     bool delayedGateOut = gateDelay.Process(trigDetector.GetState() || buttonState);
     bool clockOut = clockGenerator.Process();
     bool pulseOut = clockGenerator.GetOffsetPhase() < CTRL_1MS*2;
-    bool eighthPulseOut = clockGenerator.GetOffsetPhase() < (scaleInterval(interval, scaleFactor)>>3);
+    bool eighthPulseOut = clockGenerator.GetOffsetPhase() < (scaleInterval(clockRateDetector.GetInterval(), scaleFactor)>>3);
     bool squareOut = clockGenerator.GetSquare();
     bool fallingEdge = squareOut != lastSquareOutValue;
     lastSquareOutValue = squareOut;
@@ -233,11 +226,11 @@ void ctrlLoop() {
     if(scaleFactor == 0) {
       digitalWrite(RESET_LED, delayedGateOut);
       digitalWrite(RESET_CV, delayedGateOut);
-      analogOutVal = delayedGateOut ? 1.0 : -1.0;
+      analogWrite(A14, delayedGateOut);
     } else {
       digitalWrite(RESET_LED, squareOut && outputGate);
       digitalWrite(RESET_CV, squareOut && outputGate);
-      analogOutVal = eighthPulseOut ? 1.0 : -1.0;
+      analogWrite(A14, squareOut && outputGate);
     }
 }
 
@@ -252,15 +245,12 @@ void setup(){
     pinMode(LED1,OUTPUT);
     pinMode(LED2,OUTPUT);
     pinMode(LED3,OUTPUT);
-    AudioMemory(50);
+    pinMode(A14,OUTPUT);
     analogReadRes(ADC_BITS);
+    analogWriteRes(1);
     ctrlTimer.priority(200);
     ctrlTimer.begin(ctrlLoop, CTRL_TIMER_US);
     gateDelay.Init();
 }
 
-void loop(){
-  AudioNoInterrupts();
-  dc.amplitude(analogOutVal);
-  AudioInterrupts();
-}
+void loop() { }

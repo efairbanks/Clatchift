@@ -16,7 +16,6 @@ Clock pulses are only allowed through when the button is held.
 
 Parameter changes only take affect on incoming rising edges.
 
-TRIG is the output clock signal.
+TRIG and OUT are the output clock signal. The voltage on TRIG is rather low, and may not register as a logic high on all modules.
 
-OUT is a sawtooth wave that roughly corresponds to the phase of the sawtooth wave used to drive the clock output.
-
+This firmware runs in a 48kHz control loop with no buffering and thus is capable of processing and producing audio-rate signals.
