@@ -163,12 +163,9 @@ void ctrlLoop() {
     bool buttonPressed = buttonPressDetector.Process(buttonState ? 8191 : 0);
     bool triggered = trigDetector.Process(clockInCV);
 
-    // if(buttonState) Serial.println(scaleFactorPot);
-
     clockRateDetector.Process(triggered);
 
     if(triggered) {
-
 
       if(clockDividerIndex == 0) {
         clockGenerator.Reset();
