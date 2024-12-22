@@ -118,10 +118,38 @@ public:
   }
 };
 
+class GateDelay {
+  bool buffer[CTRL_SAMPLE_RATE];
+  bool initialized = false;
+  int index = 0;
+  int delay = 0;
+  int wrapIndex(int x) {
+    while(x>=CTRL_SAMPLE_RATE) x -= CTRL_SAMPLE_RATE;
+    while(x<0) x += CTRL_SAMPLE_RATE;
+    return x;
+  }
+public:
+  void Init() {
+    for(int i=0;i<CTRL_SAMPLE_RATE;i++) buffer[i]=0;
+    initialized = true;
+  }
+  void SetDelay(int delaySamples) {
+    delay = delaySamples;
+  }
+  int GetIndex() { return index; }
+  bool Process(int gate) {
+    int result = buffer[wrapIndex(index-delay)];
+    index = wrapIndex(index+1);
+    buffer[index] = gate;
+    return result;
+  }
+};
+
 TrigDetector buttonPressDetector;
 TrigDetector trigDetector;
 ClockRateDetector clockRateDetector;
 ClockGenerator clockGenerator;
+GateDelay gateDelay;
 
 void writeIntToLED(int x) {
   digitalWrite(LED0, (x>>0)&1);
@@ -146,6 +174,7 @@ int lastScaleFactor = 0;
 int clockDividerIndex = 0;
 int clockDividerLen = 1;
 int interval = 0;
+float analogOutVal = -1;
 
 void ctrlLoop() {
     int buttonState = digitalRead(RESET_BUTTON);
@@ -163,6 +192,11 @@ void ctrlLoop() {
     bool buttonPressed = buttonPressDetector.Process(buttonState ? 8191 : 0);
     bool triggered = trigDetector.Process(clockInCV);
 
+    if(buttonPressed || triggered) {
+      int expOffsetPot = (offsetPot*offsetPot)>>13;
+      gateDelay.SetDelay((expOffsetPot*CTRL_SAMPLE_RATE)>>13);
+    }
+
     clockRateDetector.Process(triggered);
 
     if(triggered) {
@@ -177,7 +211,6 @@ void ctrlLoop() {
       if(scaleFactor != lastScaleFactor) {
         clockDividerIndex = 0;
         clockDividerLen = 1 << (scaleFactor < -1 ? (abs(scaleFactor)-1) : 0);
-        Serial.println(clockDividerLen);
       }
 
       lastScaleFactor = scaleFactor;
@@ -185,9 +218,9 @@ void ctrlLoop() {
       clockDividerIndex = (clockDividerIndex+1)%clockDividerLen;
     }
 
-    bool gateOut = trigDetector.GetState();
+    bool delayedGateOut = gateDelay.Process(trigDetector.GetState() || buttonState);
     bool clockOut = clockGenerator.Process();
-    bool pulseOut = clockGenerator.GetOffsetPhase() < CTRL_1MS;
+    bool pulseOut = clockGenerator.GetOffsetPhase() < CTRL_1MS*2;
     bool eighthPulseOut = clockGenerator.GetOffsetPhase() < (scaleInterval(interval, scaleFactor)>>3);
     bool squareOut = clockGenerator.GetSquare();
     bool fallingEdge = squareOut != lastSquareOutValue;
@@ -198,11 +231,13 @@ void ctrlLoop() {
     ledMask = (pulseOut & eighthPulseOut) ? 0xF : 0x0;
 
     if(scaleFactor == 0) {
-      digitalWrite(RESET_LED, gateOut && outputGate);
-      digitalWrite(RESET_CV, gateOut && outputGate);
+      digitalWrite(RESET_LED, delayedGateOut);
+      digitalWrite(RESET_CV, delayedGateOut);
+      analogOutVal = delayedGateOut ? 1.0 : -1.0;
     } else {
       digitalWrite(RESET_LED, squareOut && outputGate);
       digitalWrite(RESET_CV, squareOut && outputGate);
+      analogOutVal = eighthPulseOut ? 1.0 : -1.0;
     }
 }
 
@@ -221,13 +256,11 @@ void setup(){
     analogReadRes(ADC_BITS);
     ctrlTimer.priority(200);
     ctrlTimer.begin(ctrlLoop, CTRL_TIMER_US);
+    gateDelay.Init();
 }
 
 void loop(){
-  float phase = clockGenerator.GetOffsetPhase();
-  float maxPhase = interval;
-  float normalizedClockPhase = (phase/maxPhase)*2.0 - 1.0;
   AudioNoInterrupts();
-  dc.amplitude(normalizedClockPhase);
+  dc.amplitude(analogOutVal);
   AudioInterrupts();
 }
